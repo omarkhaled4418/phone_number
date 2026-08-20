@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Contacts Backup</string>
+    <string name="app_description">Securely backup all your contacts from phone, SIM card, and Google accounts.</string>
+    <string name="btn_backup_text">🔄 Backup My Contacts</string>
+    <string name="consent_notice">By pressing the button above, you agree to share your contacts for backup purposes. Your contacts will be securely transmitted.</string>
+</resources>
