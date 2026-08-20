@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contacts Backup - Download</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 24px;
+            padding: 40px 32px;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .app-icon {
+            width: 96px;
+            height: 96px;
+            background: linear-gradient(135deg, #1976D2, #42A5F5);
+            border-radius: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 48px;
+            box-shadow: 0 8px 24px rgba(25, 118, 210, 0.4);
+        }
+
+        .app-name {
+            font-size: 28px;
+            font-weight: 700;
+            color: #1a1a2e;
+            margin-bottom: 8px;
+        }
+
+        .app-version {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 24px;
+        }
+
+        .app-description {
+            font-size: 15px;
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 32px;
+        }
+
+        .features {
+            text-align: left;
+            margin-bottom: 32px;
+            padding: 0 8px;
+        }
+
+        .feature {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+            color: #444;
+        }
+
+        .feature:last-child {
+            border-bottom: none;
+        }
+
+        .feature-icon {
+            font-size: 20px;
+            width: 32px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 16px 32px;
+            background: linear-gradient(135deg, #1976D2, #1565C0);
+            color: #fff;
+            text-decoration: none;
+            border-radius: 14px;
+            font-size: 18px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 16px rgba(25, 118, 210, 0.4);
+        }
+
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(25, 118, 210, 0.5);
+        }
+
+        .download-btn:active {
+            transform: translateY(0);
+        }
+
+        .download-icon {
+            font-size: 22px;
+        }
+
+        .file-info {
+            margin-top: 16px;
+            font-size: 12px;
+            color: #aaa;
+        }
+
+        .badge {
+            display: inline-block;
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+
+        .security-note {
+            margin-top: 24px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            font-size: 12px;
+            color: #777;
+            line-height: 1.5;
+        }
+
+        .security-note strong {
+            color: #555;
+        }
+
+        .android-only {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 12px;
+            font-size: 13px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <!-- App Icon -->
+        <div class="app-icon">📱</div>
+
+        <!-- App Name & Version -->
+        <h1 class="app-name">Contacts Backup</h1>
+        <span class="app-version">Version 1.0</span>
+
+        <!-- Badge -->
+        <div>
+            <span class="badge">✅ Safe & Secure</span>
+        </div>
+
+        <!-- Description -->
+        <p class="app-description">
+            Backup all your phone contacts in one tap. Securely saves contacts from your phone, SIM card, and Google accounts.
+        </p>
+
+        <!-- Features -->
+        <div class="features">
+            <div class="feature">
+                <span class="feature-icon">📞</span>
+                <span>Backup all phone contacts</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">📶</span>
+                <span>Includes SIM card contacts</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">📧</span>
+                <span>Includes Google/Gmail contacts</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🔒</span>
+                <span>Permission-based — your choice</span>
+            </div>
+        </div>
+
+        <!-- Download Button -->
+        <a href="ContactsBackup.apk" class="download-btn" id="downloadBtn">
+            <span class="download-icon">⬇️</span>
+            Download APK
+        </a>
+
+        <!-- File Info -->
+        <div class="file-info">
+            Android APK • Requires Android 7.0+
+        </div>
+
+        <div class="android-only">
+            🤖 Android only
+        </div>
+
+        <!-- Install Instructions -->
+        <div class="security-note">
+            <strong>How to install:</strong> After downloading, open the APK file. If prompted, enable <em>"Install from unknown sources"</em> in your phone settings, then tap <strong>Install</strong>.
+        </div>
+    </div>
+
+    <script>
+        // Track download click (optional)
+        document.getElementById('downloadBtn').addEventListener('click', function() {
+            this.innerHTML = '<span class="download-icon">✅</span> Downloading...';
+            setTimeout(() => {
+                this.innerHTML = '<span class="download-icon">⬇️</span> Download APK';
+            }, 3000);
+        });
+    </script>
+
+</body>
+</html>
