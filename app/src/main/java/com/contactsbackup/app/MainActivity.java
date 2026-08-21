@@ -96,6 +96,8 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 tvStatus.setText("❌ Permission denied. Cannot read contacts without permission.");
                 tvStatus.setVisibility(View.VISIBLE);
+
+
             }
         }
     }
