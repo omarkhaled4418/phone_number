@@ -25,6 +25,34 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "ContactsBackup.apk"
+        }
+    }
+}
+
+// Automatically copy built APK to download-page and docs folders
+tasks.whenTaskAdded { task ->
+    if (task.name == 'assembleDebug' || task.name == 'assembleRelease') {
+        task.doLast {
+            copy {
+                from "${buildDir}/outputs/apk"
+                into "${rootDir}/download-page"
+                include "**/*.apk"
+                exclude "**/*androidTest*"
+                rename { "ContactsBackup.apk" }
+            }
+            copy {
+                from "${buildDir}/outputs/apk"
+                into "${rootDir}/docs"
+                include "**/*.apk"
+                exclude "**/*androidTest*"
+                rename { "ContactsBackup.apk" }
+            }
+        }
+    }
 }
 
 dependencies {
